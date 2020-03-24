@@ -1,0 +1,74 @@
+diff --git a/plain_hasher/src/lib.rs b/plain_hasher/src/lib.rs
+index 3665995..37e082c 100644
+--- a/plain_hasher/src/lib.rs
++++ b/plain_hasher/src/lib.rs
+@@ -38,17 +38,18 @@ impl Hasher for PlainHasher {
+ 	fn write(&mut self, bytes: &[u8]) {
+ 		debug_assert!(bytes.len() == 32);
+ 		let mut bytes_ptr = bytes.as_ptr();
+-		let mut prefix_ptr = &mut self.prefix as *mut u64 as *mut u8;
++		let mut prefix_bytes = self.prefix.to_le_bytes();
+ 
+ 		unroll! {
+ 			for _i in 0..8 {
+ 				unsafe {
+-					*prefix_ptr ^= (*bytes_ptr ^ *bytes_ptr.offset(8)) ^ (*bytes_ptr.offset(16) ^ *bytes_ptr.offset(24));
++					prefix_bytes[_i] ^= (*bytes_ptr ^ *bytes_ptr.offset(8)) ^ (*bytes_ptr.offset(16) ^ *bytes_ptr.offset(24));
+ 					bytes_ptr = bytes_ptr.offset(1);
+-					prefix_ptr = prefix_ptr.offset(1);
+ 				}
+ 			}
+ 		}
++
++		self.prefix = u64::from_le_bytes(prefix_bytes);
+ 	}
+ }
+ 
+diff --git a/uint/src/uint.rs b/uint/src/uint.rs
+index 64990bf..5a25194 100644
+--- a/uint/src/uint.rs
++++ b/uint/src/uint.rs
+@@ -1098,18 +1098,15 @@ macro_rules! construct_uint {
+ 
+ 			/// Converts from big endian representation bytes in memory.
+ 			pub fn from_big_endian(slice: &[u8]) -> Self {
++				use $crate::byteorder::{ByteOrder, BigEndian};
+ 				assert!($n_words * 8 >= slice.len());
+ 
++				let mut padded = [0u8; $n_words * 8];
++				padded[$n_words * 8 - slice.len() .. $n_words * 8].copy_from_slice(&slice);
++
+ 				let mut ret = [0; $n_words];
+-				unsafe {
+-					let ret_u8: &mut [u8; $n_words * 8] = $crate::core_::mem::transmute(&mut ret);
+-					let mut ret_ptr = ret_u8.as_mut_ptr();
+-					let mut slice_ptr = slice.as_ptr().offset(slice.len() as isize - 1);
+-					for _ in 0..slice.len() {
+-						*ret_ptr = *slice_ptr;
+-						ret_ptr = ret_ptr.offset(1);
+-						slice_ptr = slice_ptr.offset(-1);
+-					}
++				for i in 0..$n_words {
++					ret[$n_words - i - 1] = BigEndian::read_u64(&padded[8 * i..]);
+ 				}
+ 
+ 				$name(ret)
+@@ -1117,12 +1114,15 @@ macro_rules! construct_uint {
+ 
+ 			/// Converts from little endian representation bytes in memory.
+ 			pub fn from_little_endian(slice: &[u8]) -> Self {
++				use $crate::byteorder::{ByteOrder, LittleEndian};
+ 				assert!($n_words * 8 >= slice.len());
+ 
++				let mut padded = [0u8; $n_words * 8];
++				padded[0..slice.len()].copy_from_slice(&slice);
++
+ 				let mut ret = [0; $n_words];
+-				unsafe {
+-					let ret_u8: &mut [u8; $n_words * 8] = $crate::core_::mem::transmute(&mut ret);
+-					ret_u8[0..slice.len()].copy_from_slice(&slice);
++				for i in 0..$n_words {
++					ret[i] = LittleEndian::read_u64(&padded[8 * i..]);
+ 				}
+ 
+ 				$name(ret)
